@@ -1,0 +1,58 @@
+.daily-review-modal {
+  --modal-width: min(920px, calc(100vw - 48px));
+  --modal-height: min(680px, calc(100vh - 64px));
+}
+.daily-review-modal .modal-content { padding: 18px 22px 24px; }
+.daily-review-layout { display: grid; grid-template-columns: 48px minmax(0, 1fr) 48px; gap: 18px; align-items: center; min-height: 480px; }
+.daily-review-arrow { width: 44px; height: 58px; border-radius: 14px; font-size: 26px; color: var(--text-muted); }
+.daily-review-arrow:hover { color: var(--text-normal); }
+.daily-review-card { min-width: 0; min-height: 420px; padding: 28px 32px; border: 1px solid var(--background-modifier-border); border-radius: 18px; background: var(--background-secondary); display: flex; flex-direction: column; }
+.daily-review-counter { color: var(--text-faint); font-size: 0.85em; text-align: right; }
+.daily-review-title { margin: 8px 0 4px; font-size: 1.8em; }
+.daily-review-path { color: var(--text-muted); font-size: 0.88em; overflow-wrap: anywhere; }
+.daily-review-details { margin-top: 18px; color: var(--text-faint); font-size: 0.85em; }
+.daily-review-preview { margin-top: 20px; padding: 16px; flex: 1; min-height: 100px; max-height: 220px; overflow: auto; border-radius: 10px; background: var(--background-primary); white-space: pre-wrap; line-height: 1.55; }
+.daily-review-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 22px; }
+.daily-review-action { border-radius: 8px; }
+.daily-review-action { display: inline-flex; align-items: center; gap: 7px; color: var(--action-text-color, var(--text-normal)); background: var(--action-background-color, var(--interactive-normal)); border-color: var(--action-background-color, var(--background-modifier-border)); }
+.daily-review-action:hover { filter: brightness(1.08); }
+.daily-review-action-icon { display: inline-flex; align-items: center; }
+.daily-review-shortcut { color: var(--text-faint); font-size: 0.75em; margin-left: 4px; }
+.daily-review-skip { color: var(--text-muted); }
+.daily-review-filter-group, .daily-review-action-setting { margin: 12px 0; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 10px; }
+.daily-review-filter-group-heading, .daily-review-filter-rule { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.daily-review-filter-group-heading strong { margin-right: auto; }
+.daily-review-filter-rule select:first-child { min-width: 130px; }
+.daily-review-filter-rule input { flex: 1; min-width: 80px; }
+.daily-review-action-setting h4 { margin: 4px 0 8px; }
+.daily-review-cover { display: block; width: 100%; max-height: 180px; object-fit: cover; border-radius: 12px; margin-bottom: 14px; }
+.daily-review-filter-group-heading input[type="text"] { flex: 1; min-width: 120px; font-weight: 600; }
+.daily-review-filter-status { margin: 8px 0; font-size: 0.85em; color: var(--text-muted); }
+.daily-review-filter-warning { margin-top: 5px; padding: 6px 8px; border-radius: 6px; color: var(--text-warning); background: var(--background-modifier-error); }
+.daily-review-filter-property { width: 130px; }
+.daily-review-icon-picker { position: relative; z-index: 2; padding: 10px; margin: 8px 0; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); }
+.daily-review-icon-picker input { width: 100%; margin-bottom: 8px; }
+.daily-review-icon-grid { display: grid; grid-template-columns: repeat(10, minmax(28px, 1fr)); gap: 4px; max-height: 180px; overflow: auto; }
+.daily-review-icon-grid button { min-height: 30px; display: grid; place-items: center; }
+.daily-review-color-row { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 0; }
+.daily-review-color-control { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; }
+.daily-review-color-control input[type="color"] { width: 34px; height: 28px; padding: 2px; }
+.daily-review-action-step { display: flex; gap: 8px; margin: 6px 0; }
+.daily-review-action-step input { flex: 1; min-width: 80px; }
+.daily-review-chooser-item { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 14px; margin: 6px 0; padding: 12px 14px; text-align: left; }
+.daily-review-chooser-item span { color: var(--text-muted); font-size: 0.9em; }
+.daily-review-icon-modal { --modal-width: min(560px, calc(100vw - 40px)); }
+.daily-review-icon-modal-grid { grid-template-columns: repeat(8, minmax(30px, 1fr)); max-height: 360px; }
+.daily-review-icon-modal-grid .is-selected { color: var(--interactive-accent); outline: 1px solid var(--interactive-accent); }
+.daily-review-chooser-modal { --modal-width: min(520px, calc(100vw - 40px)); }
+.daily-review-autocomplete-host { position: relative; flex: 1; min-width: 0; }
+.daily-review-autocomplete-host > input { width: 100%; }
+.daily-review-autocomplete-list { position: absolute; z-index: 1000; top: calc(100% + 3px); left: 0; right: 0; max-height: 220px; overflow-y: auto; padding: 4px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); box-shadow: var(--shadow-l); }
+.daily-review-autocomplete-option { display: block; width: 100%; padding: 6px 9px; border: 0; border-radius: 5px; text-align: left; overflow-wrap: anywhere; }
+.daily-review-autocomplete-option:hover, .daily-review-autocomplete-option:focus { background: var(--background-modifier-hover); }
+.daily-review-filter-rule .daily-review-autocomplete-host { min-width: 90px; }
+@media (max-width: 600px) {
+  .daily-review-layout { grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 6px; }
+  .daily-review-arrow { width: 34px; }
+  .daily-review-card { padding: 20px 16px; }
+}

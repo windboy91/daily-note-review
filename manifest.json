@@ -1,0 +1,10 @@
+{
+  "id": "daily-note-review",
+  "name": "Daily Note Review",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Bring notes back into a simple daily review and sort them with custom actions.",
+  "author": "Windboy",
+  "authorUrl": "https://github.com/windboy91",
+  "isDesktopOnly": false
+}
