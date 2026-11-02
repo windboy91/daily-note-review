@@ -15,7 +15,7 @@ Add them from **Settings → Daily Note Review → Actions** (existing installs 
 
 ## Installation
 
-- **BRAT**: add `windboy91/daily-note-review` (adjust to your repository name).
+- **BRAT**: add `windboy91/daily-note-review`.
 - **Manual**: download `main.js`, `manifest.json` and `styles.css` from the latest release into `<vault>/.obsidian/plugins/daily-note-review/`.
 
 ## Development
