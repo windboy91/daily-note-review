@@ -1,9 +1,11 @@
 {
   "name": "daily-note-review",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production"
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc -noEmit -skipLibCheck",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

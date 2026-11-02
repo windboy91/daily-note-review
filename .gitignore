@@ -1,5 +1,11 @@
+# dependencies
 node_modules/
-.DS_Store
+
+# build output (published as a release asset, not committed)
 main.js
-TEST VAULT/
-.obsidian/
+*.js.map
+
+# local Obsidian plugin data
+data.json
+
+.DS_Store

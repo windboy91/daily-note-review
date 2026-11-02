@@ -1,10 +1,10 @@
-import { App, getIconIds, getLanguage, Modal, moment, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath, setIcon } from "obsidian";
+import { App, getIconIds, getLanguage, Modal, moment, Notice, Plugin, PluginSettingTab, Setting, SuggestModal, TextComponent, TFile, TFolder, normalizePath, prepareFuzzySearch, setIcon } from "obsidian";
 
-type ActionType = "delete" | "move" | "add-property" | "add-tag" | "skip" | "open" | "append-today" | "template";
+type ActionType = "delete" | "move" | "add-property" | "add-tag" | "skip" | "open" | "append-today" | "template" | "daily-note" | "note" | "task";
 type FilterField = "created-days" | "folder" | "tag" | "property";
 type FilterOperator = "older-than" | "newer-than" | "at-least" | "at-most" | "exactly" | "contains" | "not-contains" | "starts-with" | "not-starts-with" | "ends-with" | "not-ends-with" | "equals" | "not-equals" | "greater-than" | "less-than" | "greater-or-equal" | "less-or-equal" | "exists" | "not-exists" | "is-empty" | "is-not-empty";
 interface ActionStep { type: "move" | "add-property" | "add-tag"; value: string; propertyName?: string; }
-interface ReviewAction { id: string; label: string; type: ActionType; value: string; icon: string; colorText: string; colorBackground: string; shortcut: string; propertyName?: string; insertAt?: "start" | "end" | "after-text"; anchorText?: string; steps: ActionStep[]; }
+interface ReviewAction { id: string; label: string; type: ActionType; value: string; icon: string; colorText: string; colorBackground: string; shortcut: string; propertyName?: string; insertAt?: "start" | "end" | "after-text"; anchorText?: string; targetPath?: string; lineFormat?: string; taskDestination?: TaskDestination; steps: ActionStep[]; }
 interface FilterRule { field: FilterField; operator: FilterOperator; value: string; propertyName?: string; }
 interface FilterGroup { name: string; match: "all" | "any"; rules: FilterRule[]; }
 interface ReviewSettings {
@@ -19,12 +19,65 @@ interface ReviewSettings {
   todayNoteFormat: string;
   /** Legacy combined folder/date pattern, kept so existing plugin data can be migrated. */
   todayNotePattern: string;
+  /** Optional template used when a missing daily note is created. */
+  dailyNoteTemplate: string;
+  taskFormat: "tasks" | "dataview";
+  taskIncludeLink: boolean;
+  taskAddCreated: boolean;
+  /** Set once the "daily-note", "note" and "task" buttons were added to an existing configuration. */
+  migratedTaskActions: boolean;
 }
+
+type MomentValue = ReturnType<typeof moment>;
+type TaskDestination = "daily" | "note" | "self";
+type TaskStatusKey = "todo" | "doing" | "done" | "cancelled";
+type TaskPriorityKey = "highest" | "high" | "medium" | "low" | "lowest";
+type NoteSuggestion = { file: TFile } | { create: string };
+/** A target note: an existing file, a name to create, or a preset vault path (created on demand). */
+type NotePick = NoteSuggestion | { path: string };
+interface DateChoice { key: string; label: string; date: MomentValue; }
+interface TaskFormState {
+  description: string; status: TaskStatusKey; priority: "" | TaskPriorityKey;
+  due: string; scheduled: string; start: string;
+  recurrencePreset: string; recurrenceCustom: string; whenDone: boolean;
+  tags: string; includeLink: boolean; addCreated: boolean;
+  destination: TaskDestination; dailyChoice: string; dailyCustom: string; notePick: NotePick | null;
+}
+interface TaskOptions extends TaskFormState { recurrence: string; dailyDate: MomentValue | null; }
+
+const TASK_STATUSES: Array<{ key: TaskStatusKey; char: string; en: string; fr: string }> = [
+  { key: "todo", char: " ", en: "To do", fr: "À faire" },
+  { key: "doing", char: "/", en: "In progress", fr: "En cours" },
+  { key: "done", char: "x", en: "Done", fr: "Terminée" },
+  { key: "cancelled", char: "-", en: "Cancelled", fr: "Annulée" },
+];
+const TASK_PRIORITIES: Array<{ key: TaskPriorityKey; emoji: string; en: string; fr: string }> = [
+  { key: "highest", emoji: "🔺", en: "Highest", fr: "Très haute" },
+  { key: "high", emoji: "⏫", en: "High", fr: "Haute" },
+  { key: "medium", emoji: "🔼", en: "Medium", fr: "Moyenne" },
+  { key: "low", emoji: "🔽", en: "Low", fr: "Basse" },
+  { key: "lowest", emoji: "⏬", en: "Lowest", fr: "Très basse" },
+];
+/** [Tasks-plugin syntax, English label, French label] */
+const TASK_RECURRENCES: Array<[string, string, string]> = [
+  ["", "None", "Aucune"],
+  ["every day", "Every day", "Tous les jours"],
+  ["every weekday", "Every weekday", "Tous les jours ouvrés"],
+  ["every week", "Every week", "Toutes les semaines"],
+  ["every 2 weeks", "Every 2 weeks", "Toutes les 2 semaines"],
+  ["every month", "Every month", "Tous les mois"],
+  ["every year", "Every year", "Tous les ans"],
+  ["custom", "Custom…", "Personnalisée…"],
+];
+const INTERACTIVE_ACTION_TYPES: ActionType[] = ["append-today", "daily-note", "note", "task"];
 
 const DEFAULT_ACTIONS: ReviewAction[] = [
   { id: "move", label: "Move to review", type: "move", value: "To review", icon: "folder-input", colorText: "#000000", colorBackground: "#ffffff", shortcut: "", steps: [] },
   { id: "tag", label: "Add #reviewed", type: "add-tag", value: "reviewed", icon: "tag", colorText: "#000000", colorBackground: "#ffffff", shortcut: "", steps: [] },
   { id: "open", label: "Open in background", type: "open", value: "", icon: "external-link", colorText: "#000000", colorBackground: "#ffffff", shortcut: "", steps: [] },
+  { id: "daily-note", label: "Add to daily note", type: "daily-note", value: "", icon: "calendar-plus", colorText: "#000000", colorBackground: "#ffffff", shortcut: "", steps: [] },
+  { id: "note", label: "Add to a note", type: "note", value: "", icon: "file-plus", colorText: "#000000", colorBackground: "#ffffff", shortcut: "", steps: [] },
+  { id: "task", label: "Convert to task", type: "task", value: "", icon: "list-checks", colorText: "#000000", colorBackground: "#ffffff", shortcut: "", steps: [] },
 ];
 const DEFAULT_SETTINGS: ReviewSettings = {
   dailyLimit: 10,
@@ -37,16 +90,23 @@ const DEFAULT_SETTINGS: ReviewSettings = {
   todayNoteFolder: "",
   todayNoteFormat: "YYYY-MM-DD",
   todayNotePattern: "YYYY-MM-DD.md",
+  dailyNoteTemplate: "",
+  taskFormat: "tasks",
+  taskIncludeLink: true,
+  taskAddCreated: false,
+  migratedTaskActions: false,
 };
 
 function actionFrom(value: any, index: number): ReviewAction {
   const oldType = value?.type;
-  const type: ActionType = oldType === "tag" ? "add-tag" : oldType === "property" ? "add-property" : ["delete", "move", "add-property", "add-tag", "skip", "open", "append-today", "template"].includes(oldType) ? oldType : "move";
+  const type: ActionType = oldType === "tag" ? "add-tag" : oldType === "property" ? "add-property" : ["delete", "move", "add-property", "add-tag", "skip", "open", "append-today", "template", "daily-note", "note", "task"].includes(oldType) ? oldType : "move";
   return {
     id: String(value?.id ?? `action-${index + 1}`), label: String(value?.label ?? "Action"), type,
     value: String(value?.value ?? ""), icon: String(value?.icon ?? "check"), colorText: String(value?.colorText || "#000000"), colorBackground: String(value?.colorBackground || value?.color || "#ffffff"),
     shortcut: String(value?.shortcut ?? ""), propertyName: String(value?.propertyName ?? ""), insertAt: value?.insertAt ?? "end", anchorText: String(value?.anchorText ?? ""),
     steps: Array.isArray(value?.steps) ? value.steps : [],
+    targetPath: String(value?.targetPath ?? ""), lineFormat: String(value?.lineFormat ?? ""),
+    taskDestination: ["daily", "note", "self"].includes(value?.taskDestination) ? value.taskDestination : "daily",
   };
 }
 
@@ -82,6 +142,14 @@ export default class DailyNoteReviewPlugin extends Plugin {
         if (action.type === "open" && action.label === "Ouvrir en arrière-plan") action.label = "Open in background";
       }
     }
+    if (!saved.migratedTaskActions) {
+      const knownTypes = new Set(this.settings.actions.map(item => item.type));
+      for (const candidate of this.defaultActionsForLocale()) {
+        if ((["daily-note", "note", "task"] as ActionType[]).includes(candidate.type) && !knownTypes.has(candidate.type)) this.settings.actions.push(candidate);
+      }
+      this.settings.migratedTaskActions = true;
+      await this.saveSettings();
+    }
     this.addRibbonIcon("inbox", this.t("Open daily review", "Ouvrir la revue quotidienne"), () => { void this.openReview(); });
     this.addCommand({ id: "open-daily-review", name: this.t("Open daily review", "Ouvrir la revue quotidienne"), callback: () => this.openReview() });
     this.addCommand({ id: "count-daily-review", name: this.t("Count notes to review", "Compter les notes à revoir"), callback: () => this.showReviewCount() });
@@ -94,6 +162,9 @@ export default class DailyNoteReviewPlugin extends Plugin {
       actions[0].label = "Déplacer vers À relire"; actions[0].value = "À relire";
       actions[1].label = "Ajouter #reviewed";
       actions[2].label = "Ouvrir en arrière-plan";
+      actions[3].label = "Ajouter à la note quotidienne";
+      actions[4].label = "Ajouter à une note";
+      actions[5].label = "Transformer en tâche";
     }
     return actions;
   }
@@ -291,7 +362,211 @@ export default class DailyNoteReviewPlugin extends Plugin {
     new ReviewModal(this.app, this, files, group.name).open();
   }
 
-  async applyAction(file: TFile, action: ReviewAction) {
+  // ---------------------------------------------------------------------------
+  // Dates, daily notes, target notes
+  // ---------------------------------------------------------------------------
+  dateChoices(): DateChoice[] {
+    const now = moment();
+    return [
+      { key: "today", label: this.t("Today", "Aujourd’hui"), date: now.clone() },
+      { key: "tomorrow", label: this.t("Tomorrow", "Demain"), date: now.clone().add(1, "day") },
+      { key: "next-week", label: this.t("Next week (Monday)", "Semaine prochaine (lundi)"), date: now.clone().add(1, "week").startOf("isoWeek") },
+    ];
+  }
+
+  askDate(title: string): Promise<MomentValue | null> {
+    return new Promise(resolve => new DateChoiceModal(this.app, this, title, resolve).open());
+  }
+
+  confirm(title: string, message: string, confirmText: string): Promise<boolean> {
+    return new Promise(resolve => new ConfirmModal(this.app, this, title, message, confirmText, resolve).open());
+  }
+
+  pickNote(excludePath: string): Promise<NoteSuggestion | null> {
+    return new Promise(resolve => new NotePickerModal(this.app, this, excludePath, resolve).open());
+  }
+
+  promptTask(file: TFile, action: ReviewAction): Promise<TaskOptions | null> {
+    return new Promise(resolve => new TaskModal(this.app, this, file, action, resolve).open());
+  }
+
+  dailyNoteInfo(date: MomentValue): { name: string; path: string; hasFolder: boolean } {
+    const format = (this.settings.todayNoteFormat || "YYYY-MM-DD").replace(/\.md$/i, "");
+    const name = date.format(format);
+    const folder = (this.settings.todayNoteFolder || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    return { name, path: normalizePath(`${folder ? `${folder}/` : ""}${name}.md`), hasFolder: !!folder };
+  }
+
+  findDailyNote(info: { name: string; path: string; hasFolder: boolean }): TFile | null {
+    const exact = this.app.vault.getAbstractFileByPath(info.path);
+    if (exact instanceof TFile) return exact;
+    const files = this.app.vault.getMarkdownFiles();
+    const target = info.path.toLowerCase().replace(/^\/+/, "");
+    const lenient = files.find(note => {
+      const current = normalizePath(note.path).toLowerCase().replace(/^\/+/, "");
+      return current === target || current.endsWith(`/${target}`);
+    });
+    if (lenient) return lenient;
+    if (!info.hasFolder) return files.find(note => note.basename.toLowerCase() === info.name.toLowerCase()) ?? null;
+    return null;
+  }
+
+  private async ensureFolder(folderPath: string) {
+    const clean = normalizePath(folderPath || "");
+    if (!clean || clean === "/") return;
+    let current = "";
+    for (const part of clean.split("/")) {
+      current = current ? `${current}/${part}` : part;
+      if (!(await this.app.vault.adapter.exists(current))) await this.app.vault.createFolder(current);
+    }
+  }
+
+  private async createNote(path: string, content: string): Promise<TFile> {
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) return existing;
+    const slash = path.lastIndexOf("/");
+    await this.ensureFolder(slash > 0 ? path.slice(0, slash) : "");
+    const created = await this.app.vault.create(path, content || "");
+    new Notice(this.t(`Note created: ${path}`, `Note créée : ${path}`));
+    return created;
+  }
+
+  private async renderTemplate(templatePath: string, title: string, date: MomentValue): Promise<string> {
+    const wanted = (templatePath || "").trim();
+    if (!wanted) return "";
+    let template = this.app.vault.getAbstractFileByPath(normalizePath(wanted));
+    if (!(template instanceof TFile)) template = this.app.vault.getAbstractFileByPath(normalizePath(`${wanted}.md`));
+    if (!(template instanceof TFile)) { new Notice(this.t(`Template not found: ${wanted}`, `Modèle introuvable : ${wanted}`)); return ""; }
+    const raw = await this.app.vault.cachedRead(template);
+    return raw
+      .replace(/\{\{\s*(date|time)(?::([^}]*?))?\s*\}\}/gi, (_all: string, kind: string, format?: string) => {
+        const isDate = kind.toLowerCase() === "date";
+        return (isDate ? date : moment()).format(format && format.trim() ? format.trim() : isDate ? "YYYY-MM-DD" : "HH:mm");
+      })
+      .replace(/\{\{\s*title\s*\}\}/gi, () => title);
+  }
+
+  /** Returns the daily note for `date`, offering to create it when it does not exist. `null` = cancelled. */
+  async resolveDailyNote(date: MomentValue): Promise<TFile | null> {
+    const info = this.dailyNoteInfo(date);
+    const existing = this.findDailyNote(info);
+    if (existing) return existing;
+    const human = date.format("dddd D MMMM YYYY");
+    const create = await this.confirm(
+      this.t("Daily note not found", "Note quotidienne introuvable"),
+      this.t(`The daily note for ${human} does not exist yet (${info.path}). Create it?`, `La note quotidienne du ${human} n’existe pas encore (${info.path}). La créer ?`),
+      this.t("Create note", "Créer la note"),
+    );
+    if (!create) return null;
+    return this.createNote(info.path, await this.renderTemplate(this.settings.dailyNoteTemplate, info.name, date));
+  }
+
+  private withMarkdownExtension(path: string): string {
+    const clean = normalizePath(String(path).trim().replace(/^\/+/, ""));
+    return /\.md$/i.test(clean) ? clean : `${clean}.md`;
+  }
+
+  private pathForNewNote(name: string, source: TFile): string {
+    const wanted = name.trim();
+    if (wanted.includes("/")) return this.withMarkdownExtension(wanted);
+    let folder = "";
+    try {
+      const parent = this.app.fileManager.getNewFileParent(source.path);
+      folder = parent?.path && parent.path !== "/" ? parent.path : "";
+    } catch { folder = ""; }
+    return this.withMarkdownExtension(`${folder ? `${folder}/` : ""}${wanted}`);
+  }
+
+  async resolvePickedNote(pick: NotePick | null, source: TFile): Promise<TFile | null> {
+    if (!pick) return null;
+    if ("file" in pick) return pick.file;
+    if ("create" in pick) return this.createNote(this.pathForNewNote(pick.create, source), "");
+    const path = this.withMarkdownExtension(pick.path);
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) return existing;
+    const create = await this.confirm(
+      this.t("Note not found", "Note introuvable"),
+      this.t(`The note “${path}” does not exist yet. Create it?`, `La note « ${path} » n’existe pas encore. La créer ?`),
+      this.t("Create note", "Créer la note"),
+    );
+    return create ? this.createNote(path, "") : null;
+  }
+
+  private async resolveSpecificNote(presetPath: string | undefined, source: TFile): Promise<TFile | null> {
+    if (presetPath && presetPath.trim()) return this.resolvePickedNote({ path: presetPath.trim() }, source);
+    return this.resolvePickedNote(await this.pickNote(source.path), source);
+  }
+
+  private async resolveTaskTarget(options: TaskOptions, file: TFile): Promise<TFile | null> {
+    if (options.destination === "self") return file;
+    if (options.destination === "daily") return options.dailyDate ? this.resolveDailyNote(options.dailyDate) : null;
+    return this.resolvePickedNote(options.notePick, file);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Writing lines into notes
+  // ---------------------------------------------------------------------------
+  private async insertLine(target: TFile, line: string, action: ReviewAction) {
+    await this.app.vault.process(target, content => {
+      const mode = action.insertAt ?? "end";
+      if (mode === "start") {
+        const frontmatter = content.match(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/);
+        const at = frontmatter ? frontmatter[0].length : 0;
+        const head = content.slice(0, at);
+        return `${head}${head && !head.endsWith("\n") ? "\n" : ""}${line}\n${content.slice(at)}`;
+      }
+      if (mode === "after-text") {
+        const anchor = action.anchorText ?? "";
+        const at = content.indexOf(anchor);
+        if (!anchor || at < 0) throw new Error(this.t("The insertion text was not found in the target note.", "Le texte repère n’a pas été trouvé dans la note cible."));
+        const end = at + anchor.length;
+        return `${content.slice(0, end)}\n${line}${content.slice(end)}`;
+      }
+      return `${content}${content.endsWith("\n") || !content ? "" : "\n"}${line}\n`;
+    });
+  }
+
+  private renderLine(action: ReviewAction, source: TFile, target: TFile, date?: MomentValue): string {
+    const link = this.app.fileManager.generateMarkdownLink(source, target.path);
+    const format = action.lineFormat && action.lineFormat.trim() ? action.lineFormat : action.type === "append-today" ? "{{link}}" : "- {{link}}";
+    return format
+      .replace(/\{\{\s*link\s*\}\}/g, () => link)
+      .replace(/\{\{\s*title\s*\}\}/g, () => source.basename)
+      .replace(/\{\{\s*date(?::([^}]*?))?\s*\}\}/g, (_all: string, fmt?: string) => (date ?? moment()).format(fmt && fmt.trim() ? fmt.trim() : "YYYY-MM-DD"));
+  }
+
+  buildTaskLine(file: TFile, target: TFile, o: TaskOptions): string {
+    const dataview = this.settings.taskFormat === "dataview";
+    const link = o.includeLink && target.path !== file.path ? this.app.fileManager.generateMarkdownLink(file, target.path) : "";
+    const description = (o.description || "").trim();
+    const text = description && link ? `${description} ${link}` : description || link || file.basename;
+    const tags = (o.tags || "").split(/[\s,]+/).map(tag => tag.replace(/^#+/, "").trim()).filter(Boolean).map(tag => `#${tag}`);
+    const parts = [text, ...tags];
+    const priority = TASK_PRIORITIES.find(item => item.key === o.priority);
+    let recurrence = (o.recurrence || "").trim();
+    if (recurrence && o.whenDone && !/when done$/i.test(recurrence)) recurrence += " when done";
+    const created = o.addCreated ? moment().format("YYYY-MM-DD") : "";
+    if (dataview) {
+      if (priority) parts.push(`[priority:: ${priority.key}]`);
+      if (recurrence) parts.push(`[repeat:: ${recurrence}]`);
+      if (created) parts.push(`[created:: ${created}]`);
+      if (o.start) parts.push(`[start:: ${o.start}]`);
+      if (o.scheduled) parts.push(`[scheduled:: ${o.scheduled}]`);
+      if (o.due) parts.push(`[due:: ${o.due}]`);
+    } else {
+      if (priority) parts.push(priority.emoji);
+      if (recurrence) parts.push(`🔁 ${recurrence}`);
+      if (created) parts.push(`➕ ${created}`);
+      if (o.start) parts.push(`🛫 ${o.start}`);
+      if (o.scheduled) parts.push(`⏳ ${o.scheduled}`);
+      if (o.due) parts.push(`📅 ${o.due}`);
+    }
+    const status = TASK_STATUSES.find(item => item.key === o.status);
+    return `- [${status ? status.char : " "}] ${parts.join(" ")}`;
+  }
+
+  /** Runs an action on a note. Resolves to `false` when the person cancelled a popup, so the note stays in the queue. */
+  async applyAction(file: TFile, action: ReviewAction): Promise<boolean> {
     const applyStep = async (step: ActionStep) => {
       if (step.type === "move") {
         const folder = normalizePath((step.value.trim() || "To review").replace(/^\/+/, ""));
@@ -329,27 +604,29 @@ export default class DailyNoteReviewPlugin extends Plugin {
     } else if (action.type === "open") {
       const leaf = this.app.workspace.getLeaf("tab");
       await leaf.openFile(file, { active: false });
-    } else if (action.type === "append-today") {
-      const format = (this.settings.todayNoteFormat || "YYYY-MM-DD").replace(/\.md$/i, "");
-      const formattedName = moment().format(format);
-      const folder = normalizePath((this.settings.todayNoteFolder || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""));
-      const todayPath = normalizePath(`${folder ? `${folder}/` : ""}${formattedName}.md`);
-      const normalizedTarget = todayPath.toLowerCase().replace(/^\/+/, "");
-      const todayFile = this.app.vault.getMarkdownFiles().find(note => {
-        const currentPath = normalizePath(note.path).toLowerCase().replace(/^\/+/, "");
-        return currentPath === normalizedTarget || currentPath.endsWith(`/${normalizedTarget}`);
-      }) ?? (!folder ? this.app.vault.getMarkdownFiles().find(note => note.basename.toLowerCase() === formattedName.toLowerCase()) : undefined);
-      if (!todayFile) throw new Error(this.t(`Today's note was not found: ${todayPath}`, `Note du jour introuvable : ${todayPath}`));
-      const link = `[[${file.path.replace(/\.md$/i, "")}]]`;
-      await this.app.vault.process(todayFile, content => {
-        if (action.insertAt === "start") return `${link}\n${content}`;
-        if (action.insertAt === "after-text") {
-          const anchor = action.anchorText ?? ""; const at = content.indexOf(anchor);
-          if (!anchor || at < 0) throw new Error(this.t("The insertion text was not found in today's note.", "Le texte repère n’a pas été trouvé dans la note du jour."));
-          const end = at + anchor.length; return `${content.slice(0, end)}\n${link}${content.slice(end)}`;
-        }
-        return `${content}${content.endsWith("\n") || !content ? "" : "\n"}${link}\n`;
-      });
+    } else if (action.type === "append-today" || action.type === "daily-note") {
+      let date = moment();
+      if (action.type === "daily-note") {
+        const chosen = await this.askDate(this.t("Add to daily note", "Ajouter à la note quotidienne"));
+        if (!chosen) return false;
+        date = chosen;
+      }
+      const target = await this.resolveDailyNote(date);
+      if (!target) return false;
+      await this.insertLine(target, this.renderLine(action, file, target, date), action);
+      new Notice(this.t(`Added to ${target.basename}`, `Ajouté à ${target.basename}`));
+    } else if (action.type === "note") {
+      const target = await this.resolveSpecificNote(action.targetPath, file);
+      if (!target) return false;
+      await this.insertLine(target, this.renderLine(action, file, target), action);
+      new Notice(this.t(`Added to ${target.basename}`, `Ajouté à ${target.basename}`));
+    } else if (action.type === "task") {
+      const options = await this.promptTask(file, action);
+      if (!options) return false;
+      const target = await this.resolveTaskTarget(options, file);
+      if (!target) return false;
+      await this.insertLine(target, this.buildTaskLine(file, target, options), action);
+      new Notice(this.t(`Task added to ${target.basename}`, `Tâche ajoutée à ${target.basename}`));
     } else if (action.type === "template") {
       const templatePath = normalizePath(action.value.trim());
       const template = this.app.vault.getAbstractFileByPath(templatePath);
@@ -361,13 +638,278 @@ export default class DailyNoteReviewPlugin extends Plugin {
       const until = new Date(); until.setDate(until.getDate() + days);
       this.settings.snoozedUntil[file.path] = until.toISOString().slice(0, 10);
       await this.saveSettings();
-      return;
+      return true;
     }
     for (const step of action.steps ?? []) await applyStep(step);
     const today = new Date().toISOString().slice(0, 10);
     this.settings.reviewedToday[file.path] = today;
     await this.saveSettings();
+    return true;
   }
+}
+
+class DateChoiceModal extends Modal {
+  private done = false;
+  constructor(app: App, private plugin: DailyNoteReviewPlugin, private heading: string, private resolve: (date: MomentValue | null) => void) { super(app); }
+
+  onOpen() {
+    const t = (en: string, fr: string) => this.plugin.t(en, fr);
+    this.titleEl.setText(this.heading);
+    for (const choice of this.plugin.dateChoices()) {
+      new Setting(this.contentEl).setName(choice.label).setDesc(choice.date.format("dddd D MMMM YYYY"))
+        .addButton(button => button.setButtonText(t("Select", "Choisir")).onClick(() => this.choose(choice.date)));
+    }
+    let picked = moment().format("YYYY-MM-DD");
+    new Setting(this.contentEl).setName(t("Pick a date", "Choisir une date"))
+      .addText(text => { text.inputEl.type = "date"; text.setValue(picked).onChange(value => { picked = value; }); })
+      .addButton(button => button.setButtonText("OK").setCta().onClick(() => {
+        const date = moment(picked, "YYYY-MM-DD", true);
+        if (!date.isValid()) { new Notice(t("Please enter a valid date.", "Veuillez saisir une date valide.")); return; }
+        this.choose(date);
+      }));
+  }
+
+  choose(date: MomentValue) { this.done = true; this.resolve(date); this.close(); }
+  onClose() { if (!this.done) this.resolve(null); this.contentEl.empty(); }
+}
+
+class ConfirmModal extends Modal {
+  private done = false;
+  constructor(app: App, private plugin: DailyNoteReviewPlugin, private heading: string, private message: string, private confirmText: string, private resolve: (value: boolean) => void) { super(app); }
+
+  onOpen() {
+    this.titleEl.setText(this.heading);
+    this.contentEl.createEl("p", { text: this.message });
+    new Setting(this.contentEl)
+      .addButton(button => button.setButtonText(this.plugin.t("Cancel", "Annuler")).onClick(() => this.finish(false)))
+      .addButton(button => button.setButtonText(this.confirmText).setCta().onClick(() => this.finish(true)));
+    this.scope.register([], "Enter", () => { this.finish(true); return false; });
+  }
+
+  finish(value: boolean) { this.done = true; this.resolve(value); this.close(); }
+  onClose() { if (!this.done) this.resolve(false); this.contentEl.empty(); }
+}
+
+class NotePickerModal extends SuggestModal<NoteSuggestion> {
+  private picked = false;
+  constructor(app: App, private plugin: DailyNoteReviewPlugin, private excludePath: string, private resolve: (pick: NoteSuggestion | null) => void) {
+    super(app);
+    this.setPlaceholder(plugin.t("Search a note, or type a name to create one…", "Rechercher une note, ou saisir un nom pour en créer une…"));
+  }
+
+  getSuggestions(query: string): NoteSuggestion[] {
+    const all = this.app.vault.getMarkdownFiles();
+    const files = all.filter(file => file.path !== this.excludePath);
+    const q = query.trim();
+    if (!q) {
+      const recent = this.app.workspace.getLastOpenFiles()
+        .map(path => this.app.vault.getAbstractFileByPath(path))
+        .filter((file): file is TFile => file instanceof TFile && file.extension === "md" && file.path !== this.excludePath);
+      const rest = files.filter(file => !recent.includes(file)).sort((a, b) => b.stat.mtime - a.stat.mtime);
+      return [...recent, ...rest].slice(0, 50).map(file => ({ file }));
+    }
+    const search = prepareFuzzySearch(q);
+    const matches: Array<{ file: TFile; score: number }> = [];
+    for (const file of files) {
+      const match = search(file.path);
+      if (match) matches.push({ file, score: match.score });
+    }
+    matches.sort((a, b) => b.score - a.score);
+    const results: NoteSuggestion[] = matches.slice(0, 30).map(item => ({ file: item.file }));
+    const lower = q.toLowerCase();
+    const exists = all.some(file => file.basename.toLowerCase() === lower || file.path.toLowerCase() === lower || file.path.toLowerCase() === `${lower}.md`);
+    if (!exists) results.push({ create: q });
+    return results;
+  }
+
+  renderSuggestion(item: NoteSuggestion, el: HTMLElement) {
+    el.addClass("mod-complex");
+    const content = el.createDiv({ cls: "suggestion-content" });
+    if ("create" in item) {
+      content.createDiv({ cls: "suggestion-title", text: this.plugin.t(`Create “${item.create}”`, `Créer « ${item.create} »`) });
+      content.createDiv({ cls: "suggestion-note", text: this.plugin.t("New note", "Nouvelle note") });
+      return;
+    }
+    content.createDiv({ cls: "suggestion-title", text: item.file.basename });
+    const folder = item.file.parent && item.file.parent.path !== "/" ? item.file.parent.path : "";
+    if (folder) content.createDiv({ cls: "suggestion-note", text: folder });
+  }
+
+  onChooseSuggestion(item: NoteSuggestion) { this.picked = true; this.resolve(item); }
+
+  onClose() {
+    super.onClose();
+    // The selection callback may run after onClose, so resolve "cancelled" on the next tick only.
+    window.setTimeout(() => { if (!this.picked) this.resolve(null); }, 0);
+  }
+}
+
+class TaskModal extends Modal {
+  private done = false;
+  private destHost: HTMLElement;
+  private state: TaskFormState;
+  constructor(app: App, private plugin: DailyNoteReviewPlugin, private file: TFile, private action: ReviewAction, private resolve: (options: TaskOptions | null) => void) {
+    super(app);
+    this.state = {
+      description: "", status: "todo", priority: "", due: "", scheduled: "", start: "",
+      recurrencePreset: "", recurrenceCustom: "", whenDone: false, tags: "",
+      includeLink: plugin.settings.taskIncludeLink !== false, addCreated: !!plugin.settings.taskAddCreated,
+      destination: action.taskDestination ?? "daily", dailyChoice: "today", dailyCustom: moment().format("YYYY-MM-DD"),
+      notePick: action.targetPath && action.targetPath.trim() ? { path: action.targetPath.trim() } : null,
+    };
+  }
+
+  onOpen() {
+    const t = (en: string, fr: string) => this.plugin.t(en, fr);
+    const s = this.state;
+    const el = this.contentEl;
+    const quick = this.plugin.dateChoices();
+    this.titleEl.setText(t("Convert to task", "Transformer en tâche"));
+    el.createEl("p", { text: this.file.path, cls: "setting-item-description" });
+
+    let descriptionInput: HTMLInputElement | undefined;
+    new Setting(el).setName(t("Task", "Tâche")).setDesc(t("Leave empty to use the note title.", "Laisser vide pour utiliser le titre de la note.")).addText(text => {
+      descriptionInput = text.inputEl;
+      text.setPlaceholder(this.file.basename).onChange(value => { s.description = value; });
+      text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
+        if (evt.key === "Enter" && !evt.isComposing) { evt.preventDefault(); this.submit(); }
+      });
+    });
+
+    new Setting(el).setName(t("Status", "Statut")).addDropdown(dropdown => {
+      TASK_STATUSES.forEach(item => dropdown.addOption(item.key, `[${item.char}] ${t(item.en, item.fr)}`));
+      dropdown.setValue(s.status).onChange(value => { s.status = value as TaskStatusKey; });
+    });
+
+    new Setting(el).setName(t("Priority", "Priorité")).addDropdown(dropdown => {
+      dropdown.addOption("", t("None", "Aucune"));
+      TASK_PRIORITIES.forEach(item => dropdown.addOption(item.key, `${item.emoji} ${t(item.en, item.fr)}`));
+      dropdown.setValue(s.priority).onChange(value => { s.priority = value as TaskFormState["priority"]; });
+    });
+
+    const dateRow = (key: "due" | "scheduled" | "start", label: string) => {
+      let dateInput: TextComponent | undefined;
+      const setting = new Setting(el).setName(label);
+      setting.addDropdown(dropdown => {
+        dropdown.addOption("", t("Quick pick…", "Raccourci…"));
+        quick.forEach(choice => dropdown.addOption(choice.key, `${choice.label} — ${choice.date.format("ddd D MMM")}`));
+        dropdown.addOption("clear", t("Clear", "Effacer"));
+        dropdown.onChange(value => {
+          if (!value) return;
+          const found = quick.find(choice => choice.key === value);
+          s[key] = found ? found.date.format("YYYY-MM-DD") : "";
+          dateInput?.setValue(s[key]);
+          dropdown.setValue("");
+        });
+      });
+      setting.addText(text => {
+        dateInput = text;
+        text.inputEl.type = "date";
+        text.setValue(s[key]).onChange(value => { s[key] = value; });
+      });
+    };
+    dateRow("due", `📅 ${t("Due date", "Échéance")}`);
+    dateRow("scheduled", `⏳ ${t("Scheduled date", "Date planifiée")}`);
+    dateRow("start", `🛫 ${t("Start date", "Date de début")}`);
+
+    let customText: TextComponent | undefined;
+    let whenDoneSetting: Setting | undefined;
+    const refreshRecurrence = () => {
+      if (customText) customText.inputEl.style.display = s.recurrencePreset === "custom" ? "" : "none";
+      if (whenDoneSetting) whenDoneSetting.settingEl.style.display = s.recurrencePreset ? "" : "none";
+    };
+    new Setting(el).setName(`🔁 ${t("Recurrence", "Récurrence")}`)
+      .addDropdown(dropdown => {
+        TASK_RECURRENCES.forEach(([value, en, fr]) => dropdown.addOption(value, t(en, fr)));
+        dropdown.setValue(s.recurrencePreset).onChange(value => { s.recurrencePreset = value; refreshRecurrence(); });
+      })
+      .addText(text => { customText = text; text.setPlaceholder("every 3 days").onChange(value => { s.recurrenceCustom = value; }); });
+    whenDoneSetting = new Setting(el).setName(t("Repeat from completion date", "Répéter depuis la date de réalisation"))
+      .setDesc(t("Adds “when done” to the recurrence.", "Ajoute « when done » à la récurrence."))
+      .addToggle(toggle => toggle.setValue(s.whenDone).onChange(value => { s.whenDone = value; }));
+    refreshRecurrence();
+
+    new Setting(el).setName(t("Tags", "Tags")).setDesc(t("Separated by spaces or commas, with or without #.", "Séparés par des espaces ou des virgules, avec ou sans #."))
+      .addText(text => text.setPlaceholder("work, urgent").onChange(value => { s.tags = value; }));
+    new Setting(el).setName(t("Link to the source note", "Lier à la note source"))
+      .addToggle(toggle => toggle.setValue(s.includeLink).onChange(value => { s.includeLink = value; }));
+    new Setting(el).setName(`➕ ${t("Add creation date", "Ajouter la date de création")}`)
+      .addToggle(toggle => toggle.setValue(s.addCreated).onChange(value => { s.addCreated = value; }));
+
+    new Setting(el).setName(t("Add the task to", "Ajouter la tâche à")).addDropdown(dropdown => {
+      dropdown.addOption("daily", t("A daily note", "Une note quotidienne"));
+      dropdown.addOption("note", t("A specific note", "Une note précise"));
+      dropdown.addOption("self", t("The note itself", "La note elle-même"));
+      dropdown.setValue(s.destination).onChange(value => { s.destination = value as TaskDestination; this.renderDestination(); });
+    });
+    this.destHost = el.createDiv();
+    this.renderDestination();
+
+    new Setting(el)
+      .addButton(button => button.setButtonText(t("Cancel", "Annuler")).onClick(() => this.finish(null)))
+      .addButton(button => button.setButtonText(t("Add task", "Ajouter la tâche")).setCta().onClick(() => this.submit()));
+    window.setTimeout(() => descriptionInput?.focus(), 50);
+  }
+
+  private renderDestination() {
+    const t = (en: string, fr: string) => this.plugin.t(en, fr);
+    const s = this.state;
+    const host = this.destHost;
+    host.empty();
+    if (s.destination === "daily") {
+      const quick = this.plugin.dateChoices();
+      new Setting(host).setName(t("Daily note date", "Date de la note quotidienne")).addDropdown(dropdown => {
+        quick.forEach(choice => dropdown.addOption(choice.key, `${choice.label} — ${choice.date.format("ddd D MMM")}`));
+        dropdown.addOption("custom", t("Pick a date…", "Choisir une date…"));
+        dropdown.setValue(s.dailyChoice).onChange(value => { s.dailyChoice = value; this.renderDestination(); });
+      });
+      if (s.dailyChoice === "custom") {
+        new Setting(host).setName(t("Date", "Date")).addText(text => {
+          text.inputEl.type = "date";
+          text.setValue(s.dailyCustom).onChange(value => { s.dailyCustom = value; });
+        });
+      }
+      host.createEl("p", { text: t("If that daily note does not exist, you will be offered to create it.", "Si cette note quotidienne n’existe pas, il vous sera proposé de la créer."), cls: "setting-item-description" });
+    } else if (s.destination === "note") {
+      const pick = s.notePick;
+      const label = !pick ? t("No note selected", "Aucune note sélectionnée")
+        : "file" in pick ? pick.file.path
+        : "create" in pick ? t(`New note: ${pick.create}`, `Nouvelle note : ${pick.create}`)
+        : pick.path;
+      new Setting(host).setName(t("Target note", "Note cible")).setDesc(label).addButton(button => button.setButtonText(pick ? t("Change…", "Modifier…") : t("Choose…", "Choisir…")).onClick(async () => {
+        const picked = await this.plugin.pickNote(this.file.path);
+        if (picked) { s.notePick = picked; this.renderDestination(); }
+      }));
+    } else {
+      host.createEl("p", { text: t("The task is inserted in this note, following the button’s insertion settings.", "La tâche est insérée dans cette note, selon les réglages d’insertion du bouton."), cls: "setting-item-description" });
+    }
+  }
+
+  private submit() {
+    const t = (en: string, fr: string) => this.plugin.t(en, fr);
+    const s = this.state;
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if ((["due", "scheduled", "start"] as const).some(key => s[key] && !dateRegex.test(s[key]))) {
+      new Notice(t("One of the dates is invalid.", "Une des dates est invalide.")); return;
+    }
+    const recurrence = (s.recurrencePreset === "custom" ? s.recurrenceCustom : s.recurrencePreset).trim();
+    if (recurrence && this.plugin.settings.taskFormat !== "dataview" && !s.due && !s.scheduled && !s.start) {
+      new Notice(t("A recurring task needs a due, scheduled or start date.", "Une tâche récurrente nécessite une échéance, une date planifiée ou une date de début.")); return;
+    }
+    let dailyDate: MomentValue | null = null;
+    if (s.destination === "daily") {
+      if (s.dailyChoice === "custom") dailyDate = moment(s.dailyCustom, "YYYY-MM-DD", true);
+      else dailyDate = this.plugin.dateChoices().find(choice => choice.key === s.dailyChoice)?.date ?? moment();
+      if (!dailyDate.isValid()) { new Notice(t("The daily note date is invalid.", "La date de la note quotidienne est invalide.")); return; }
+    }
+    if (s.destination === "note" && !s.notePick) {
+      new Notice(t("Choose a target note first.", "Choisissez d’abord une note cible.")); return;
+    }
+    this.finish({ ...s, recurrence, dailyDate });
+  }
+
+  private finish(result: TaskOptions | null) { this.done = true; this.resolve(result); this.close(); }
+  onClose() { if (!this.done) this.resolve(null); this.contentEl.empty(); }
 }
 
 class ReviewChooserModal extends Modal {
@@ -412,6 +954,7 @@ class IconPickerModal extends Modal {
 
 class ReviewModal extends Modal {
   private index = 0;
+  private busy = false;
   private card: HTMLDivElement;
   private shortcutHandler = (evt: KeyboardEvent) => this.handleShortcut(evt);
   constructor(app: App, private plugin: DailyNoteReviewPlugin, private files: TFile[], private reviewName: string) { super(app); }
@@ -432,6 +975,7 @@ class ReviewModal extends Modal {
   }
 
   private handleShortcut(evt: KeyboardEvent) {
+    if (this.busy) return;
     if (evt.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(evt.target.tagName)) return;
     const pressed = [evt.metaKey || evt.ctrlKey ? "mod" : "", evt.altKey ? "alt" : "", evt.shiftKey ? "shift" : "", evt.key.toLowerCase()].filter(Boolean).join("+");
     const action = this.plugin.settings.actions.find(item => item.shortcut.trim().toLowerCase() === pressed);
@@ -439,13 +983,17 @@ class ReviewModal extends Modal {
   }
 
   private async runAction(action: ReviewAction) {
+    if (this.busy) return;
+    this.busy = true;
     const file = this.files[this.index];
     try {
-      await this.plugin.applyAction(file, action);
-      this.files.splice(this.index, 1);
+      if (!(await this.plugin.applyAction(file, action))) return; // cancelled in a popup: keep the note in the queue
+      const position = this.files.indexOf(file);
+      if (position >= 0) this.files.splice(position, 1);
       if (!this.files.length) { new Notice(this.plugin.t("Review complete!", "Revue terminée !")); this.close(); return; }
       this.show(Math.min(this.index, this.files.length - 1));
     } catch (error) { new Notice(this.plugin.t(`Action failed: ${String(error)}`, `Action impossible : ${String(error)}`)); }
+    finally { this.busy = false; }
   }
 
   private show(index: number) {
@@ -573,6 +1121,19 @@ class ReviewSettingTab extends PluginSettingTab {
       await save();
     }));
 
+    addSettingInput(el, t("Daily note template", "Modèle de note quotidienne"), this.plugin.settings.dailyNoteTemplate, t("Template file (optional)", "Fichier modèle (facultatif)"), this.plugin.getVaultSuggestions("templates"), async value => { this.plugin.settings.dailyNoteTemplate = value; await save(); },
+      t("Used when a missing daily note is created. Supports {{date}}, {{date:FORMAT}}, {{time}} and {{title}}.", "Utilisé quand une note quotidienne manquante est créée. Prend en charge {{date}}, {{date:FORMAT}}, {{time}} et {{title}}."));
+
+    el.createEl("h3", { text: t("Tasks", "Tâches") });
+    new Setting(el).setName(t("Task format", "Format des tâches"))
+      .setDesc(t("Tasks plugin uses emojis (📅 ⏳ 🛫 🔁); Dataview uses inline fields ([due:: 2026-01-31]).", "Le plugin Tasks utilise des emojis (📅 ⏳ 🛫 🔁) ; Dataview utilise des champs inline ([due:: 2026-01-31])."))
+      .addDropdown(dropdown => dropdown.addOption("tasks", t("Tasks plugin (emojis)", "Plugin Tasks (emojis)")).addOption("dataview", t("Dataview (inline fields)", "Dataview (champs inline)")).setValue(this.plugin.settings.taskFormat)
+        .onChange(async value => { this.plugin.settings.taskFormat = value as ReviewSettings["taskFormat"]; await save(); }));
+    new Setting(el).setName(t("Link to the source note by default", "Lier à la note source par défaut"))
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.taskIncludeLink !== false).onChange(async value => { this.plugin.settings.taskIncludeLink = value; await save(); }));
+    new Setting(el).setName(t("Add creation date by default", "Ajouter la date de création par défaut"))
+      .addToggle(toggle => toggle.setValue(!!this.plugin.settings.taskAddCreated).onChange(async value => { this.plugin.settings.taskAddCreated = value; await save(); }));
+
     el.createEl("h3", { text: t("Filter groups", "Groupes de filtres") });
     el.createEl("p", { text: t("Groups are combined with OR. Rules within each group use AND or OR.", "Les groupes sont combinés avec OU. Les règles d’un groupe utilisent ET ou OU."), cls: "setting-item-description" });
     const groupsHost = el.createDiv({ cls: "daily-review-filter-groups" });
@@ -642,7 +1203,7 @@ class ReviewSettingTab extends PluginSettingTab {
         section.createEl("h4", { text: `${t("Action", "Action")} ${index + 1}` });
         new Setting(section).setName(t("Button label", "Nom du bouton")).addText(text => text.setValue(action.label).onChange(async value => { action.label = value; await save(); }));
         new Setting(section).setName(t("Action type", "Action à effectuer")).addDropdown(dropdown => {
-          const types: Array<[ActionType, string]> = [["delete", t("Delete (move to trash)", "Supprimer (mettre à la corbeille)")], ["move", t("Move to folder", "Déplacer vers un dossier")], ["add-property", t("Add / edit property", "Ajouter / modifier une propriété")], ["add-tag", t("Add tag", "Ajouter un tag")], ["skip", t("Snooze for X days", "Reporter de X jours")], ["open", t("Open in background", "Ouvrir en arrière-plan")], ["append-today", t("Append link to today's note", "Ajouter un lien dans la note du jour")], ["template", t("Apply template", "Appliquer un modèle")]];
+          const types: Array<[ActionType, string]> = [["delete", t("Delete (move to trash)", "Supprimer (mettre à la corbeille)")], ["move", t("Move to folder", "Déplacer vers un dossier")], ["add-property", t("Add / edit property", "Ajouter / modifier une propriété")], ["add-tag", t("Add tag", "Ajouter un tag")], ["skip", t("Snooze for X days", "Reporter de X jours")], ["open", t("Open in background", "Ouvrir en arrière-plan")], ["append-today", t("Append link to today's note", "Ajouter un lien dans la note du jour")], ["template", t("Apply template", "Appliquer un modèle")], ["daily-note", t("Add to a daily note (choose the date)", "Ajouter à une note quotidienne (choix de la date)")], ["note", t("Add to a specific note", "Ajouter à une note précise")], ["task", t("Convert to task", "Transformer en tâche")]];
           types.forEach(([value, label]) => dropdown.addOption(value, label)); dropdown.setValue(action.type).onChange(async value => { action.type = value as ActionType; await save(); renderActions(); });
         });
         if (["move", "add-tag", "skip", "template"].includes(action.type)) {
@@ -654,7 +1215,20 @@ class ReviewSettingTab extends PluginSettingTab {
           addSettingInput(section, t("Property name", "Nom de la propriété"), action.propertyName ?? "", "status", this.plugin.getVaultSuggestions("properties"), async value => { action.propertyName = value; await save(); });
           addSettingInput(section, t("Property value", "Valeur de la propriété"), action.value, "", () => this.plugin.getVaultSuggestions("property-values", action.propertyName ?? ""), async value => { action.value = value; await save(); });
         }
-        if (action.type === "append-today") {
+        if (action.type === "task") {
+          new Setting(section).setName(t("Default destination", "Destination par défaut")).setDesc(t("Can be changed each time in the task popup.", "Modifiable à chaque fois dans la fenêtre de la tâche."))
+            .addDropdown(dropdown => dropdown.addOption("daily", t("A daily note", "Une note quotidienne")).addOption("note", t("A specific note", "Une note précise")).addOption("self", t("The note itself", "La note elle-même")).setValue(action.taskDestination ?? "daily")
+              .onChange(async value => { action.taskDestination = value as TaskDestination; await save(); renderActions(); }));
+        }
+        if (action.type === "note" || (action.type === "task" && action.taskDestination === "note")) {
+          addSettingInput(section, t("Target note", "Note cible"), action.targetPath ?? "", t("Leave empty to choose each time", "Laisser vide pour choisir à chaque fois"), this.plugin.getVaultSuggestions("templates"), async value => { action.targetPath = value; await save(); },
+            t("Vault path, e.g. Projects/Inbox.md. If it does not exist, you will be offered to create it.", "Chemin dans le coffre, ex. Projets/Inbox.md. Si elle n’existe pas, il vous sera proposé de la créer."));
+        }
+        if (action.type === "daily-note" || action.type === "note") {
+          addSettingInput(section, t("Line format", "Format de la ligne"), action.lineFormat ?? "", "- {{link}}", [], async value => { action.lineFormat = value; await save(); },
+            t("Placeholders: {{link}}, {{title}}, {{date}}. Default: - {{link}}", "Variables : {{link}}, {{title}}, {{date}}. Par défaut : - {{link}}"));
+        }
+        if (INTERACTIVE_ACTION_TYPES.includes(action.type)) {
           new Setting(section).setName(t("Insert at", "Insérer à")).addDropdown(dropdown => dropdown.addOption("start", t("Beginning", "Début")).addOption("end", t("End", "Fin")).addOption("after-text", t("After specific text", "Après un texte précis")).setValue(action.insertAt ?? "end").onChange(async value => { action.insertAt = value as ReviewAction["insertAt"]; await save(); renderActions(); }));
           if (action.insertAt === "after-text") new Setting(section).setName(t("Text to find", "Texte repère")).addText(text => text.setValue(action.anchorText ?? "").onChange(async value => { action.anchorText = value; await save(); }));
         }
