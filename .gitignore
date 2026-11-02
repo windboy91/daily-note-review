@@ -1,6 +1,7 @@
 # dependencies
 node_modules/
 
+
 # build output (published as a release asset, not committed)
 main.js
 *.js.map
@@ -9,3 +10,5 @@ main.js
 data.json
 
 .DS_Store
+
+TEST VAULT/
