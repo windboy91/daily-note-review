@@ -28,21 +28,11 @@ Three new review actions, available from **Settings → Daily Note Review → Ac
 
 Tasks are written with [Tasks plugin](https://publish.obsidian.md/tasks/) emojis by default; you can switch to Dataview inline fields (`[due:: 2026-01-31]`) in the settings. Closing one of these popups without confirming cancels the action, and the note stays in your review queue.
 
-## Interface previews
+## How it works
 
-The static images below are illustrative previews drawn for this README, not screenshots from Obsidian. The animations above are real recordings.
-
-### Choose a daily review
-
-![Illustrative preview of the Daily Note Review selection window](https://raw.githubusercontent.com/windboy91/daily-note-review/main/docs/screenshots/daily-review-selection.svg)
-
-Choose a filter group and see how many notes match before opening the review.
-
-### Filter groups and actions
-
-![Illustrative preview of Daily Note Review filter and action settings](https://raw.githubusercontent.com/windboy91/daily-note-review/main/docs/screenshots/filter-groups-and-actions.svg)
-
-Build reusable groups of rules and configure the actions available while reviewing.
+1. Setup what notes you want to review based on parameters (Creation date, tags, folders...)
+2. Each day (or by clicking the ribbon button or with the commande palette "Daily Note Review: Open daily review"), the plugin prompt you to choose which review you want to do.
+3. Based on your selected action, quickly review your notes.
 
 ## What it does
 
@@ -92,33 +82,3 @@ See [CHANGELOG.md](CHANGELOG.md) for the version history.
 ## License
 
 [GPL-3.0](LICENSE)
-
----
-
-## Français
-
-J’avais besoin d’un système dédié pour que mes notes reviennent à moi et que je puisse les relire simplement, de façon organisée, chaque jour. **Daily Note Review** sélectionne des notes de votre coffre à partir de filtres configurables, puis les présente dans une fenêtre de revue pour les trier au fil de la lecture.
-
-Le plugin peut sélectionner chaque jour un nombre limité de notes, les filtrer par ancienneté, dossier, étiquette ou propriété YAML, et proposer des actions personnalisées : déplacer ou supprimer une note, modifier ses propriétés, ajouter une étiquette, la mettre de côté jusqu'à plus tard, l'ouvrir en arrière-plan, ajouter un lien à la note du jour ou appliquer un modèle. Les groupes de filtres sont combinés par **OU** ; les règles à l'intérieur d'un groupe peuvent être combinées par **ET** ou **OU**. Les résultats et les règles incohérentes sont signalés pendant la configuration.
-
-### Nouveautés de la 0.2.0
-
-Trois nouvelles actions, à ajouter depuis **Paramètres → Daily Note Review → Actions** (les installations existantes reçoivent les trois boutons automatiquement, une seule fois) :
-
-- **Ajouter à la note quotidienne** : aujourd’hui, demain, semaine prochaine (lundi) ou une date de votre choix. Si la note n’existe pas, une fenêtre propose de la créer, éventuellement à partir d’un modèle.
-- **Ajouter à une note précise** : recherche d’une note, ou saisie d’un nom pour en créer une nouvelle. La note cible peut aussi être fixée dans les réglages du bouton.
-- **Transformer en tâche** : statut, priorité, 📅 échéance, ⏳ date planifiée, 🛫 date de début, 🔁 récurrence (avec « when done »), tags, ➕ date de création et lien vers la note source. La tâche est ajoutée à une note quotidienne, à une note précise ou à la note elle-même. Le format est celui du plugin Tasks (emojis) ou celui de Dataview (champs inline), au choix dans les réglages.
-
-Fermer l’une de ces fenêtres sans valider annule l’action : la note reste dans la file de revue.
-
-L’interface passe automatiquement en français lorsque la langue d’Obsidian est le français. La version actuelle est une première version (`0.2.0`), en cours d’essai dans un coffre de test.
-
-Créé par [Windboy](https://github.com/windboy91), avec Luna 6 comme outil de vibecoding. L’historique des versions : [CHANGELOG.md](CHANGELOG.md).
-
-### Installation
-
-Téléchargez `main.js`, `manifest.json` et `styles.css` depuis la [dernière version publiée](https://github.com/windboy91/daily-note-review/releases/latest), puis placez-les dans `<coffre>/.obsidian/plugins/daily-note-review/`. Rechargez Obsidian et activez **Daily Note Review** dans **Paramètres → Modules complémentaires communautaires**. Avec [BRAT](https://github.com/TfTHacker/obsidian42-brat), ajoutez le dépôt `windboy91/daily-note-review` pour installer et mettre à jour le plugin automatiquement.
-
-### Développement
-
-Lancez `npm install`, puis `npm run dev` pour compiler à chaque modification ou `npm run build` pour une compilation de production (`npm run typecheck` vérifie les types TypeScript). Copiez ensuite `main.js`, `manifest.json` et `styles.css` dans le dossier du plugin de votre coffre et rechargez Obsidian.
