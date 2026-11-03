@@ -53,7 +53,7 @@ With [BRAT](https://github.com/TfTHacker/obsidian42-brat), add the repository `w
 
 ## Use
 
-Open **Ouvrir la revue quotidienne** / **Open daily review** from the ribbon or command palette. Choose a filter group to start reviewing. Use **Compter les notes à revoir** / **Count notes to review** to see the number of matching notes without opening the review.
+Open **Open daily review** from the ribbon or command palette. Choose a filter group to start reviewing. Use **Count notes to review** to see the number of matching notes without opening the review.
 
 The default filter selects notes at least seven days old, with a daily limit of ten. Adjust groups, rules, actions, today's-note location and format, the daily note template, task format and cover behavior in the plugin settings.
 
