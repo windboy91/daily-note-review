@@ -6,6 +6,8 @@ Created by [Windboy](https://github.com/windboy91). Vibe-coded with AI.
 
 I wanted a dedicated system that would bring my notes back to me and make it simple and organized to review them every day. **Daily Note Review** selects notes from your vault using filters you define, then lets you review and sort them from a focused window.
 
+** Feel free to edit the plugin to your needs and workflow 😉 **
+
 ## Demo
 
 ### Review your notes
