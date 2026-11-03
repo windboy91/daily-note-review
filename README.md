@@ -10,7 +10,7 @@ I wanted a dedicated system that would bring my notes back to me and make it sim
 
 ### Review your notes
 
-<p align="center"><img src="https://raw.githubusercontent.com/windboy91/daily-note-review/main/docs/screenshots/Overwiew%20daily%20note%20review.gif" alt="Daily Note Review: choosing a filter group and reviewing notes" width="800"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/windboy91/daily-note-review/main/docs/screenshots/Overview%20daily%20note%20review.gif" alt="Daily Note Review: choosing a filter group and reviewing notes" width="800"></p>
 
 ### Configure filters and actions
 
